@@ -203,8 +203,49 @@ def load_collision_obj(file_path):
             
     return collision
             
+     
+### input handling
+
+x, y = 800, 450
+
+def onDrag(e):
+    global x, y
+    x, y = e.getX(), e.getY()
+
+class inputHandler:
+    def __init__(self):
+        self.mode = 0
+        self.keys = [0, 0, 0, 0]
+        
+        
+        #mode 0
+        self.timers = [0, 0, 0, 0]
+        
+        #mode 1
+        
+        
+    def update(self, t):
+        key = getKeyCode()
+        
+        if self.mode == 0:
+            if key == 38 or key == 87:
+                self.timers[0] = t
+            elif key == 40 or key == 83:
+                self.timers[1] = t
+            elif key == 39 or key == 68:
+                self.timers[2] = t
+            elif key == 37 or key == 65:
+                self.timers[3] = t
                 
+            for i, k in enumerate(self.keys):
+                self.keys[i] = (1 / ((t - self.timers[i]) * 2 + 1)) ** 2
+            
+        elif self.mode == 1:
+            self.keys[2] = max(min((x - 800) / 400, 1), -1)
+            self.keys[0] = max(min(-(y - 450) / 200, 1), -1)
+                              
 ### 3d drawing and geometry handling
+
 
 
 class Ggb:
@@ -230,7 +271,7 @@ class Ggb:
 
 class Scene:
     def __init__(self):
-        makeTurtle()
+        makeTurtle(mouseDragged = onDrag)
         
         self.ggb = Ggb()
         self.playground = getPlayground()
@@ -294,40 +335,7 @@ def raycast_y(origin, collision):
     return closest_tri
 
 
-### input handling
 
-class inputHandler:
-    def __init__(self):
-        self.mode = 0
-        self.keys = [0, 0, 0, 0]
-        
-        #mode 0
-        self.timers = [0, 0, 0, 0]
-        
-        #mode 1
-        
-        
-        
-    def update(self, t):
-        key = getKeyCode()
-        
-        if self.mode == 0:
-            if key == 38 or key == 87:
-                self.timers[0] = t
-            elif key == 40 or key == 83:
-                self.timers[1] = t
-            elif key == 39 or key == 68:
-                self.timers[2] = t
-            elif key == 37 or key == 65:
-                self.timers[3] = t
-                
-            for i, k in enumerate(self.keys):
-                self.keys[i] = (1 / ((t - self.timers[i]) * 2 + 1)) ** 2
-            
-        elif self.mode == 1:
-            pass
-                
-        
         
 
 ### car
@@ -362,11 +370,12 @@ collision = load_collision_obj("racingcollision.obj")
 
 
 
-lightsource = normalize([100, 200, -100])
+lightsource = normalize([-100, 200, -100])
+
+
+ih = inputHandler()
 
 scene = Scene()
-
-projection_matrix = perspective_matrix(1, radians(90), 0.01, 100, 1000)
 
 
 lang = pi
@@ -377,17 +386,21 @@ lxang = 0
 lzang = 0
 angacc = 0
 acc = [0, 0, 0]
+lacc = acc
 p = [-20, 15, 0]
 lp = p
 
-ih = inputHandler()
 
-#ih.mode = 1
 
+ih.mode = 1
+
+
+lt = time()
 while True:
     scene.clear_geometry()
     t = time()
-
+    dt = t - lt
+    lt = t
     scene.add_geometry(track_vertices, track_normals, track_faces)
     
     
@@ -410,9 +423,9 @@ while True:
     
     
         
-    angacc -= 0.0015 * ih.keys[2]
+    angacc -= 0.002 * ih.keys[2]
         
-    angacc += 0.0015 * ih.keys[3]
+    angacc += 0.002 * ih.keys[3]
 
     
 
@@ -429,11 +442,11 @@ while True:
             
        
         
-        acc[0] += sin(ang)*.2 * ih.keys[0] * friction
-        acc[2] += cos(ang)*.2 * ih.keys[0] * friction
+        acc[0] += sin(ang)* .2 * ih.keys[0] * friction
+        acc[2] += cos(ang)* .2 * ih.keys[0] * friction
         
-        acc[0] -= sin(ang)*.15 * ih.keys[1] * friction
-        acc[2] -= cos(ang)*.15 * ih.keys[1] * friction
+        acc[0] -= sin(ang)* .15 * ih.keys[1] * friction
+        acc[2] -= cos(ang)* .15 * ih.keys[1] * friction
 
     
         acc = sub(acc, mul(r[1], dot_product(acc, r[1])))
@@ -448,13 +461,15 @@ while True:
         
         
     acc[1] -= 0.003
-
+    
+    lacc = div(add(acc, mul(lacc, 10)), 11)
+    
+    projection_matrix = perspective_matrix(1, radians(min(90 + length(lacc) * 100, 140)), 0.0001, 100, 1000)
         
     
-
         
     scene.add_geometry(transform_vertices(car_vertices, matrix_multiply(matrix_multiply(matrix_multiply(translation_matrix([p[0], p[1], p[2]]), rotation_matrix_z(lzang)), rotation_matrix_x(lxang)), rotation_matrix_y(ang))), car_normals, car_faces)
     
-    scene.transform_geometry(matrix_multiply(matrix_multiply(matrix_multiply(matrix_multiply(projection_matrix, translation_matrix([0, 0, -20])), rotation_matrix_x(0.4)), rotation_matrix_y(pi-lang)), translation_matrix([-lp[0], -lp[1], -lp[2]])))
+    scene.transform_geometry(matrix_multiply(matrix_multiply(matrix_multiply(matrix_multiply(projection_matrix, translation_matrix([0, 0, -12])), rotation_matrix_x(0.4)), rotation_matrix_y(pi-lang)), translation_matrix([-lp[0], -lp[1], -lp[2]])))
     
     scene.present()
