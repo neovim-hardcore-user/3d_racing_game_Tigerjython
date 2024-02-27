@@ -206,11 +206,14 @@ def load_collision_obj(file_path):
      
 ### input handling
 
-x, y = 800, 450
+screen = [1600, 900]
+
+x, y = screen[0] / 2, screen[1] / 2
 
 def onDrag(e):
     global x, y
     x, y = e.getX(), e.getY()
+    
 
 class inputHandler:
     def __init__(self):
@@ -225,6 +228,7 @@ class inputHandler:
         
         
     def update(self, t):
+        global x, y
         key = getKeyCode()
         
         if self.mode == 0:
@@ -241,8 +245,23 @@ class inputHandler:
                 self.keys[i] = (1 / ((t - self.timers[i]) * 2 + 1)) ** 2
             
         elif self.mode == 1:
-            self.keys[2] = max(min((x - 800) / 400, 1), -1)
-            self.keys[0] = max(min(-(y - 450) / 200, 1), -1)
+            self.keys[2] = max(min((x - screen[0] / 2) / (screen[0] * 0.25) , 1), -1)
+            self.keys[0] = max(min(-(y - screen[1] / 2) / (screen[1] * 0.25), 1), -1)
+            
+            w = getPenWidth()
+            setPenWidth(3)
+            setPos(x - screen[0] / 2, -y + screen[1] / 2)
+            setPenColor("darkgrey")
+            dot(20)
+            setPos(screen[0] / 2, 0)
+            moveTo(-screen[0] / 2, 0)
+            
+            setPos(0, screen[1] / 2)
+            moveTo(0, -screen[1] / 2)
+            
+            setPenWidth(w)
+            if key == 32:
+                x, y = screen[0] / 2, screen[1] / 2
                               
 ### 3d drawing and geometry handling
 
@@ -260,9 +279,10 @@ class Ggb:
         self.faces = []
     
     def add(self, vertices, normals, faces):
-        self.faces += [[face[0] + len(self.vertices), 
-                        face[1] + len(self.vertices), 
-                        face[2] + len(self.vertices), 
+        lv = len(self.vertices)
+        self.faces += [[face[0] + lv, 
+                        face[1] + lv, 
+                        face[2] + lv, 
                         face[3] + len(self.normals), 
                         face[4]] for face in faces]
                             
@@ -276,6 +296,7 @@ class Scene:
         self.ggb = Ggb()
         self.playground = getPlayground()
         self.playground.enableRepaint(False)
+        self.playground.clear()
         
     def add_geometry(self, vertices, normals, faces):
         self.ggb.add(vertices, normals, faces)
@@ -296,13 +317,15 @@ class Scene:
             pos = [self.ggb.vertices[face[tri]] for tri in range(0, 3)]
             
             if is_frontfacing(pos) and not(min(pos[0][2], pos[1][2], pos[2][2]) <= 0):
-                l = max(min(dot_product(self.ggb.normals[face[3]], lightsource), 1), 0) * 1.2 + 0.4
+                #fog = min(max((pos[0][2]+pos[1][2]+pos[2][2])/300, 0), 1)
+                l = max(min(dot_product(self.ggb.normals[face[3]], lightsource), 1), 0) * 1.3 + 0.4
                 color = makeColor(min(max(colors[face[4]][0] * l, 0), 1), min(max(colors[face[4]][1] * l, 0), 1), min(max(colors[face[4]][2] * l, 0), 1), colors[face[4]][3])
-        
+                
                 
                 setFillColor(color)
                 setPenColor(color)
                 draw_triangle(pos)
+                
         self.playground.repaint()
 
 ### physics handling
@@ -338,21 +361,85 @@ def raycast_y(origin, collision):
 
         
 
-### car
+### gameplay and camera
 
-class car:
+class Camera:
+    def __init__(self):
+        self.pos = [0, 0, 0]
+        self.transform_matrix = [[0]*4]*4
+    
+    def update(self, car):
+        self.pos = div(add(mul(self.pos, 20), sub(car.pos, mul(car.vel, 7))), 21)
+        
+        self.transform_matrix = perspective_matrix(1, radians(min(90 + length(car.vel) * 100, 140)), 0.0001, 100, screen[1])
+        self.transform_matrix = matrix_multiply(self.transform_matrix, translation_matrix([0, 0, -13]))
+        self.transform_matrix = matrix_multiply(self.transform_matrix, rotation_matrix_x(0.4))
+        self.transform_matrix = matrix_multiply(self.transform_matrix, rotation_matrix_y(pi-car.smoothangle[1]))
+        self.transform_matrix = matrix_multiply(self.transform_matrix, translation_matrix([-self.pos[0], -self.pos[1] - 2, -self.pos[2]]))
+        
+        
+
+class Car:
     def __init__(self, pos):
+        self.reset(pos)
+    
+    def reset(self, pos):
+        self.angle = [0, -pi/4, 0]
+        self.smoothangle = self.angle
+        self.anglevel = 0
+        self.respawn = pos
+        
+        
         self.pos = pos
+        self.vel = [0, 0, 0]
+        
+    def update(self, collision, ih):
+        self.angle[1] += self.anglevel
+        self.smoothangle = div(add(self.angle, mul(self.smoothangle, 19)), 20)
+        
+        self.anglevel *= 0.9
+        self.pos = add(self.pos, self.vel)
+        
+        self.anglevel += 0.002 * (ih.keys[3] - ih.keys[2])
+        
+        intersect = raycast_y([self.pos[0], self.pos[1], self.pos[2]], collision)
+
+        if intersect[0] <= 0.5 and intersect != None:
+            self.pos[1] = self.pos[1] - intersect[0] + 0.5
+            
+            if intersect[2] == 0:
+                friction = 0.03
+            elif intersect[2] == 1:
+                friction = 0.07
+            elif intersect[2] == 2:
+                friction = 0.015
+                
+            self.vel[0] += sin(self.angle[1])* .3 * (ih.keys[0] - ih.keys[1]) * friction
+            self.vel[2] += cos(self.angle[1])* .3 * (ih.keys[0] - ih.keys[1]) * friction
+            
+            self.vel = sub(self.vel, mul(intersect[1], dot_product(self.vel, intersect[1])))
+            self.vel = sub(self.vel, mul(self.vel, friction))
+            
+            self.angle[0] = atan2(intersect[1][2], intersect[1][1])
+            self.angle[2] = atan2(-intersect[1][0], intersect[1][1])
+            
+        self.vel[1] -= 0.003
+        
+        if self.pos[1] <= -18:
+            self.reset(self.respawn)
+        
+    def transformation_matrix(self):
+        return matrix_multiply(matrix_multiply(matrix_multiply(translation_matrix(self.pos), rotation_matrix_z(self.smoothangle[2])), rotation_matrix_x(self.smoothangle[0])), rotation_matrix_y(self.angle[1]))
 
 ### geometry
 
 colors = [[0.453, 0.514, 0.022, 1], 
           [0.116, 0.116, 0.116, 1], 
           [0.349, 0.164, 0.048, 1], 
-          [0.418, 0.802, 0.0, 1], 
+          [0.418, 0.802, 0.000, 1], 
           [0.829, 0.047, 0.020, 0.7], 
-          [0.8, 0.8, 0.8, 1], 
-          [0.014, 0.802, 0.0, 0.7], 
+          [0.800, 0.800, 0.800, 1], 
+          [0.014, 0.802, 0.000, 0.7], 
           [0.139, 0.139, 0.139, 1], 
           [0.316, 0.153, 0.801, 1], 
           [0.131, 0.131, 0.131, 1]]
@@ -368,108 +455,37 @@ collision = load_collision_obj("racingcollision.obj")
 ### mainloop
 
 
+scene = Scene()
+speed(-1)
 
 
-lightsource = normalize([-100, 200, -100])
+lightsource = normalize([-100, 100, 100])
 
 
 ih = inputHandler()
-
-scene = Scene()
-
-
-lang = pi
-ang = -pi/4 
-xang = 0
-zang = 0
-lxang = 0
-lzang = 0
-angacc = 0
-acc = [0, 0, 0]
-lacc = acc
-p = [-20, 15, 0]
-lp = p
-
-
-
 ih.mode = 1
 
+car = Car([-29, 17, -2])
+camera = Camera()
 
-lt = time()
+
 while True:
     scene.clear_geometry()
     t = time()
-    dt = t - lt
-    lt = t
+
+    
+    
     scene.add_geometry(track_vertices, track_normals, track_faces)
-    
-    
-
     ih.update(t)
-        
     
-
-    ang += angacc
-    lang = (ang + lang*17) / 18
-    angacc *= 0.9
-
-    p[0] += acc[0]
-    p[1] += acc[1]
-    p[2] += acc[2]
-    
-    lp = div(add(sub(p, mul(acc, 20)), mul(lp, 20)), 21)
-    
-    r = raycast_y([p[0], p[1], p[2]], collision)
+    car.update(collision, ih)
+    camera.update(car)
     
     
         
-    angacc -= 0.002 * ih.keys[2]
-        
-    angacc += 0.002 * ih.keys[3]
-
+    scene.add_geometry(transform_vertices(car_vertices, car.transformation_matrix()), car_normals, car_faces)
     
-
-    if r[0] <= 0.5 and r != None:
-        p[1] = p[1] - r[0] + 0.5
-        
-        if r[2] == 0:
-            friction = 0.03
-        elif r[2] == 1:
-            friction = 0.07
-        elif r[2] == 2:
-            friction = 0.02
-            
-            
-       
-        
-        acc[0] += sin(ang)* .2 * ih.keys[0] * friction
-        acc[2] += cos(ang)* .2 * ih.keys[0] * friction
-        
-        acc[0] -= sin(ang)* .15 * ih.keys[1] * friction
-        acc[2] -= cos(ang)* .15 * ih.keys[1] * friction
-
-    
-        acc = sub(acc, mul(r[1], dot_product(acc, r[1])))
-        
-        acc = sub(acc, mul(acc, friction))
-        
-        xang = atan2(r[1][2], r[1][1])
-        zang = atan2(-r[1][0], r[1][1])
-        
-        lxang = (xang + lxang * 25)/26
-        lzang = (zang + lzang * 25)/26
-        
-        
-    acc[1] -= 0.003
-    
-    lacc = div(add(acc, mul(lacc, 10)), 11)
-    
-    projection_matrix = perspective_matrix(1, radians(min(90 + length(lacc) * 100, 140)), 0.0001, 100, 1000)
-        
-    
-        
-    scene.add_geometry(transform_vertices(car_vertices, matrix_multiply(matrix_multiply(matrix_multiply(translation_matrix([p[0], p[1], p[2]]), rotation_matrix_z(lzang)), rotation_matrix_x(lxang)), rotation_matrix_y(ang))), car_normals, car_faces)
-    
-    scene.transform_geometry(matrix_multiply(matrix_multiply(matrix_multiply(matrix_multiply(projection_matrix, translation_matrix([0, 0, -12])), rotation_matrix_x(0.4)), rotation_matrix_y(pi-lang)), translation_matrix([-lp[0], -lp[1], -lp[2]])))
+    scene.transform_geometry(camera.transform_matrix)
     
     scene.present()
+    
